@@ -32,7 +32,8 @@ export async function getRecentBlockhash(rpcUrl: string): Promise<Uint8Array> {
 export async function pumpFunCreate(opts: {
   seed: Uint8Array;            // 32-byte private seed of the funding wallet
   pubkey: Uint8Array;          // matching public key (base58)
-  mint: Uint8Array;            // 32-byte mint keypair secret-derived? we pass a fresh generated mint pubkey
+  mint: Uint8Array;            // 32-byte mint pubkey
+  mintSeed: Uint8Array;        // 32-byte mint keypair seed (must sign the create tx)
   name: string; symbol: string; uri: string;
   buySol: number;              // initial buy in SOL (0 = create only)
   slippage?: number;
@@ -43,7 +44,7 @@ export async function pumpFunCreate(opts: {
   const payload = {
     publicKey: b58encode(opts.pubkey),
     action: 'create',
-    tokenMetadata: { uri: opts.uri, name: opts.name, ticker: opts.symbol },
+    tokenMetadata: { uri: opts.uri, name: opts.name, symbol: opts.symbol },
     mint: mintB58,
     denominatedInSol: 'true',
     amount: opts.buySol,
@@ -61,19 +62,35 @@ export async function pumpFunCreate(opts: {
     throw new Error(`trade-local HTTP ${res.status}: ${t.slice(0, 300)}`);
   }
   const buf = new Uint8Array(await res.arrayBuffer());
-  // PumpPortal returns a serialized legacy transaction (message-first, no signatures). Detect:
-  // a legacy unsigned message starts with numRequiredSignatures (1) — but so may other things.
-  // Heuristic: byte0==1 and byte1==0 (nRequired=1, nReadonlySigned=0) → message layout.
-  if (buf[0] !== 1 || buf[1] !== 0) {
-    throw new Error(`unexpected trade-local response format: first bytes ${buf[0]},${buf[1]} (len ${buf.length})`);
+  // PumpPortal returns a VersionedTransaction (v0): [compact-u16 sigcount][sig slots (zeros)][message]
+  // where message starts with version byte 0x80|v. Sign the message as-is.
+  const nSig = buf[0];
+  if (nSig < 1 || nSig > 5) throw new Error(`unexpected sigcount byte0=${buf[0]} (len ${buf.length})`);
+  const msgStart = 1 + nSig * 64;
+  const msg = buf.subarray(msgStart);
+  if (!(msg[0] & 0x80)) throw new Error(`expected versioned message (0x80|v), got ${msg[0]}`);
+  // sign the message with both keypairs, place sigs in matching slots (slots = zeros otherwise)
+  const sigs = [signEd25519(opts.seed, msg), signEd25519(opts.mintSeed, msg)];
+  const pubkeys = [opts.pubkey, opts.mint];
+  const nAcct = msg[4] | ((msg[5] & 0x7f) << 8); // after version byte: [reqSigs][rdSigned][rdUnsigned][nAccts...]
+  // static account keys start after version+3 header bytes + compact nAccts (1 byte for <128)
+  const keysStart = 5;
+  const slotOf = new Map<number, number>();
+  let signerIdx = 0;
+  for (let i = 0; i < Math.min(nSig, nAcct); i++) {
+    const k = msg.subarray(keysStart + i * 32, keysStart + (i + 1) * 32);
+    for (let s = 0; s < pubkeys.length; s++) {
+      if (Buffer.from(k).equals(Buffer.from(pubkeys[s]))) slotOf.set(s, signerIdx++);
+    }
   }
-  // Rebuild via our builder: we cannot re-derive PumpPortal's exact message with our compiler,
-  // so sign the message AS-IS: signature = ed25519(message), wire = [1][sig][message].
-  const sig = signEd25519(opts.seed, buf);
-  const wire = new Uint8Array(1 + 64 + buf.length);
-  wire[0] = 1;
-  wire.set(sig, 1);
-  wire.set(buf, 65);
+  const wire = new Uint8Array(1 + nSig * 64 + msg.length);
+  wire[0] = nSig;
+  for (let s = 0; s < pubkeys.length; s++) {
+    const idx = slotOf.get(s);
+    if (idx === undefined) throw new Error(`signer ${s} not found among first ${nSig} static accounts`);
+    wire.set(sigs[s], 1 + idx * 64);
+  }
+  wire.set(msg, 1 + nSig * 64);
   const b64 = Buffer.from(wire).toString('base64');
   const send = await rpc('sendTransaction', [b64, { encoding: 'base64', preflightCommitment: 'confirmed' }], opts.rpcUrl);
   const signature = typeof send === 'string' ? send : String(send);

@@ -24,18 +24,29 @@ function fail(msg: string): never {
 
 async function main() {
   const launch = process.env.COIN_LAUNCH === '1';
-  // wallet
-  const kpBytes = process.env.MAKEFUN_WALLET_JSON
-    ? JSON.parse(process.env.MAKEFUN_WALLET_JSON)
-    : JSON.parse(readFileSync(new URL('../makefun-keypair.json', import.meta.url), 'utf8'));
-  const { seed, pubkey } = loadKeypairJson(kpBytes);
-  const walletB58 = b58encode(pubkey);
 
   // config validation
   if (!COIN_NAME || !COIN_SYMBOL || !COIN_DESC || !REPO_RAW_BASE) {
     fail('set COIN_NAME, COIN_SYMBOL, COIN_DESC, METADATA_BASE');
   }
   if (!COIN_DESC.includes(REQUIRED_LINE)) fail(`COIN_DESC must contain the exact line: ${REQUIRED_LINE}`);
+
+  // idempotency: if LAUNCH.json exists, validate on-chain and exit (no keypair needed)
+  if (existsSync('LAUNCH.json')) {
+    const L = JSON.parse(readFileSync('LAUNCH.json', 'utf8'));
+    console.log('[coin] LAUNCH.json exists:', L.mint, L.create_signature);
+    const info = await rpc('getAccountInfo', [L.mint, { encoding: 'base64' }], RPC);
+    if (!info?.value) fail('LAUNCH.json mint does not exist on chain');
+    console.log('[coin] mint exists on chain — OK, nothing to do');
+    return;
+  }
+
+  // wallet (only needed to launch)
+  const kpBytes = process.env.MAKEFUN_WALLET_JSON
+    ? JSON.parse(process.env.MAKEFUN_WALLET_JSON)
+    : JSON.parse(readFileSync(new URL('../makefun-keypair.json', import.meta.url), 'utf8'));
+  const { seed, pubkey } = loadKeypairJson(kpBytes);
+  const walletB58 = b58encode(pubkey);
 
   mkdirSync('assets', { recursive: true });
   const logo = renderLogoPng(10);
@@ -96,7 +107,7 @@ async function main() {
   console.log('[coin] metadata + image are live on GitHub raw ✓');
 
   const res = await pumpFunCreate({
-    seed, pubkey, mint: mintKp.pubkey,
+    seed, pubkey, mint: mintKp.pubkey, mintSeed: mintKp.seed,
     name: COIN_NAME, symbol: COIN_SYMBOL, uri: metadataUri,
     buySol: Number(process.env.COIN_BUY_SOL ?? 0),
     priorityFee: Number(process.env.COIN_PRIORITY_FEE ?? 0.0003),
