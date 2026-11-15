@@ -10,6 +10,7 @@ import { pumpFunCreate, rpc, getRecentBlockhash } from './src/pump.ts';
 import { renderLogoPng } from './src/image.ts';
 
 const REQUIRED_LINE = 'make.fun/bounty/makefun-coin-promo-01';
+const VERSION = 'coin-entry r4';
 const WEBSITE = 'https://make.fun/bounty/makefun-coin-promo-01';
 const RPC = (process.env.SOLANA_RPC ?? 'https://api.mainnet-beta.solana.com');
 
@@ -26,6 +27,7 @@ function fail(msg: string): never {
 }
 
 async function main() {
+  console.log('[coin] version:', VERSION);
   const launch = process.env.COIN_LAUNCH === '1';
 
   // config validation
