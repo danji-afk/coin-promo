@@ -1,6 +1,6 @@
 // PumpPortal local trade API + Solana RPC helpers. Zero-dep, node:http(s) via fetch.
 import { TransactionBuilder, generateKeypair, signEd25519 } from './tx.ts';
-import { b58encode } from './base58.ts';
+import { b58encode, b58decode } from './base58.ts';
 
 const PP_LOCAL = 'https://pumpportal.fun/api/trade-local';
 
@@ -20,8 +20,6 @@ export async function getRecentBlockhash(rpcUrl: string): Promise<Uint8Array> {
   const r = await rpc('getLatestBlockhash', [{ commitment: 'finalized' }], rpcUrl);
   const bh = r?.value?.blockhash;
   if (!bh) throw new Error('no blockhash in response');
-  // base58 decode via our own: import lazily to avoid cycles is fine — b58decode
-  const { b58decode } = await import('./base58.ts');
   return b58decode(bh);
 }
 
@@ -108,3 +106,5 @@ export async function pumpFunCreate(opts: {
   }
   throw new Error(`tx not confirmed in 60s: sig=${signature}`);
 }
+
+export { TransactionBuilder, generateKeypair, signEd25519 };

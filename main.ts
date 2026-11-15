@@ -1,9 +1,10 @@
 // makefun-coin-promo-01 entry: launch one pump.fun coin from the linked make.fun wallet.
 // DRY-RUN by default (COIN_LAUNCH unset): prints the full plan, validates constants, writes assets/.
-// COIN_LAUNCH=1: uploads nothing to third parties; metadata URI = GitHub raw (public repo), then
-// PumpPortal local trade API (sign locally) -> sendTransaction -> confirm -> LAUNCH.json.
+// COIN_LAUNCH=1: metadata URI = GitHub raw (public repo), then PumpPortal local trade API
+// (sign locally, key never leaves the machine) -> sendTransaction -> confirm -> LAUNCH.json.
+// Re-running after launch is a no-op: LAUNCH.json is validated against the chain.
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { b58encode, b58decode } from './src/base58.ts';
+import { b58encode } from './src/base58.ts';
 import { loadKeypairJson, generateKeypair } from './src/tx.ts';
 import { pumpFunCreate, rpc, getRecentBlockhash } from './src/pump.ts';
 import { renderLogoPng } from './src/image.ts';
@@ -56,6 +57,9 @@ async function main() {
   const mintB58 = b58encode(mintKp.pubkey);
   const imageUri = `${REPO_RAW_BASE}/assets/logo.png`;
   const metadataUri = `${REPO_RAW_BASE}/metadata.json`;
+  const buySol = Number(process.env.COIN_BUY_SOL ?? 0);
+  const priorityFee = Number(process.env.COIN_PRIORITY_FEE ?? 0.0003);
+  if (!(priorityFee >= 0 && priorityFee <= 0.01)) fail(`priorityFee out of sane range: ${priorityFee}`);
 
   const metadata = {
     name: COIN_NAME,
@@ -76,25 +80,16 @@ async function main() {
   console.log('[coin] metadata :', metadataUri);
   console.log('[coin] website  :', WEBSITE);
   console.log('[coin] mint(new):', mintB58);
+  console.log('[coin] buy      :', buySol, 'SOL | priorityFee:', priorityFee, 'SOL');
   console.log('[coin] rpc      :', RPC);
 
   // validate blockhash RPC reachability (works in both modes)
   const bh = await getRecentBlockhash(RPC);
   console.log('[coin] blockhash ok:', b58encode(bh).slice(0, 12) + '…');
 
-  // idempotency: if LAUNCH.json exists, validate on-chain and exit
-  if (existsSync('LAUNCH.json')) {
-    const L = JSON.parse(readFileSync('LAUNCH.json', 'utf8'));
-    console.log('[coin] LAUNCH.json exists:', L.mint, L.create_signature);
-    const info = await rpc('getAccountInfo', [L.mint, { encoding: 'base64' }], RPC);
-    if (!info?.value) fail('LAUNCH.json mint does not exist on chain');
-    console.log('[coin] mint exists on chain — OK, nothing to do');
-    return;
-  }
-
   if (!launch) {
     writeFileSync('metadata.json', JSON.stringify(metadata, null, 2));
-    console.log('[coin] DRY-RUN: metadata.json written. Fee estimate: priority 0.0003 SOL + pump create fee 0.02? (see log) + rent ~0.0026 + sig fee 0.000005 — actual seen in the wild ≈ 0.0124 SOL total.');
+    console.log('[coin] DRY-RUN: metadata.json written. Estimated cost ≈ 0.0124 SOL total (seen in the wild: priority 0.0003 + create fee + rent ~0.0026 + sig fee 0.000005).');
     console.log('[coin] Next: commit assets/logo.png + metadata.json to the public repo (raw URL must be live BEFORE launch), then run with COIN_LAUNCH=1.');
     return;
   }
@@ -109,8 +104,7 @@ async function main() {
   const res = await pumpFunCreate({
     seed, pubkey, mint: mintKp.pubkey, mintSeed: mintKp.seed,
     name: COIN_NAME, symbol: COIN_SYMBOL, uri: metadataUri,
-    buySol: Number(process.env.COIN_BUY_SOL ?? 0),
-    priorityFee: Number(process.env.COIN_PRIORITY_FEE ?? 0.0003),
+    buySol, priorityFee,
     rpcUrl: RPC,
   });
   writeFileSync('LAUNCH.json', JSON.stringify({ mint: res.mint, create_signature: res.signature }, null, 2));
