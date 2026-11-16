@@ -1,8 +1,10 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { copyFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { createCoin, mintExists } from './src/pump.ts';
 import { generateLogo } from './src/image.ts';
 
-const launchPath = new URL('./LAUNCH.json', import.meta.url);
+const launchPath = join(process.env.MAKEFUN_BOT_DIR ?? process.cwd(), 'LAUNCH.json');
 
 async function main(): Promise<void> {
   const VERSION = 'coin-entry r6';
@@ -10,6 +12,9 @@ async function main(): Promise<void> {
   let text: string;
   try {
     text = await readFile(launchPath, 'utf8');
+    const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+    mkdirSync(outputDir, { recursive: true });
+    copyFileSync(launchPath, join(outputDir, 'LAUNCH.json'));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       console.log('[coin] LAUNCH.json unreadable');
