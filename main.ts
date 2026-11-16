@@ -5,7 +5,8 @@ import { generateLogo } from './src/image.ts';
 const launchPath = new URL('./LAUNCH.json', import.meta.url);
 
 async function main(): Promise<void> {
-  console.log('[coin] version: coin-entry r6');
+  const VERSION = 'coin-entry r6';
+  console.log(`[coin] version: ${VERSION}`);
   let text: string;
   try {
     text = await readFile(launchPath, 'utf8');
