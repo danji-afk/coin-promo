@@ -10,7 +10,7 @@ import { pumpFunCreate, rpc, getRecentBlockhash } from './src/pump.ts';
 import { renderLogoPng } from './src/image.ts';
 
 const REQUIRED_LINE = 'make.fun/bounty/makefun-coin-promo-01';
-const VERSION = 'coin-entry r4';
+const VERSION = 'coin-entry r5';
 const WEBSITE = 'https://make.fun/bounty/makefun-coin-promo-01';
 const RPC = (process.env.SOLANA_RPC ?? 'https://api.mainnet-beta.solana.com');
 
